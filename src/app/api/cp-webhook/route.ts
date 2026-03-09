@@ -21,6 +21,7 @@ interface TgMessage {
   chat: TgChat;
   date: number;
   text?: string;
+  new_chat_members?: TgUser[];
 }
 
 interface TgCallbackQuery {
@@ -113,6 +114,15 @@ db.prepare(
 `
 ).run();
 
+db.prepare(
+  `
+  CREATE TABLE IF NOT EXISTS cp_group_lang (
+    chat_id INTEGER PRIMARY KEY,
+    language TEXT NOT NULL
+  )
+`
+).run();
+
 const upsertSessionStmt = db.prepare(`
   INSERT INTO cp_sessions (user_id, username, current_question, answers_json, finished, last_updated)
   VALUES (@user_id, @username, @current_question, @answers_json, @finished, @last_updated)
@@ -162,6 +172,19 @@ const deleteProfileStmt = db.prepare(`
   WHERE user_id = ?
 `);
 
+const getGroupLangStmt = db.prepare(`
+  SELECT language
+  FROM cp_group_lang
+  WHERE chat_id = ?
+`);
+
+const upsertGroupLangStmt = db.prepare(`
+  INSERT INTO cp_group_lang (chat_id, language)
+  VALUES (@chat_id, @language)
+  ON CONFLICT(chat_id) DO UPDATE SET
+    language = excluded.language
+`);
+
 const upsertGroupUserStmt = db.prepare(`
   INSERT INTO cp_group_users (user_id, chat_id, username, last_seen)
   VALUES (@user_id, @chat_id, @username, @last_seen)
@@ -200,13 +223,13 @@ function resetUserCpData(userId: number) {
 function getUserLanguage(userId: number): CpLanguage {
   try {
     const row = getUserLangStmt.get(userId) as { language: string } | undefined;
-    if (!row) return 'en';
+    if (!row) return 'zh';
     if (row.language === 'zh' || row.language === 'ru' || row.language === 'en') {
       return row.language;
     }
-    return 'en';
+    return 'zh';
   } catch {
-    return 'en';
+    return 'zh';
   }
 }
 
@@ -221,6 +244,29 @@ function upsertGroupUser(userId: number, chatId: number, username: string) {
     username,
     last_seen: Date.now(),
   });
+}
+
+function getGroupLanguage(chatId: number): CpLanguage | null {
+  try {
+    const row = getGroupLangStmt.get(chatId) as { language: string } | undefined;
+    if (!row) return null;
+    if (row.language === 'zh' || row.language === 'ru' || row.language === 'en') {
+      return row.language;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function setGroupLanguage(chatId: number, lang: CpLanguage) {
+  upsertGroupLangStmt.run({ chat_id: chatId, language: lang });
+}
+
+function resolveLangForGroup(chatId: number, userId: number): CpLanguage {
+  const groupLang = getGroupLanguage(chatId);
+  if (groupLang) return groupLang;
+  return getUserLanguage(userId);
 }
 
 function loadSession(userId: number): CpSession | null {
@@ -775,6 +821,61 @@ export async function POST(request: Request) {
         upsertGroupUser(userId, msg.chat.id, username);
       }
 
+      // 有新成员进群时，自动在群里发一段 CP bot 使用说明（按群语言优先）
+      if (
+        (msg.chat.type === 'group' || msg.chat.type === 'supergroup') &&
+        msg.new_chat_members &&
+        msg.new_chat_members.length > 0
+      ) {
+        const lang = resolveLangForGroup(msg.chat.id, userId);
+        const mention = msg.new_chat_members
+          .map((m) => (m.username ? `@${m.username}` : m.first_name))
+          .join('、');
+
+        const botUsername = process.env.TELEGRAM_CP_BOT_USERNAME;
+        const botLink = botUsername ? `https://t.me/${botUsername}?start=cp` : '';
+
+        const textForGroup =
+          lang === 'zh'
+            ? [
+                `欢迎 ${mention} 来到本群～`,
+                '',
+                '这里有一只专门负责「搞 CP」的小功能 bot。',
+                botLink
+                  ? `先点这里跟我打个招呼：${botLink}`
+                  : '先点一下我的头像，在私聊里点「Start」跟我打个招呼。',
+                '',
+                '打过招呼之后：',
+                '· 在群里发送 /cpstart，我会私聊给你发 6 道赛博恋爱题目；',
+                '· 至少两个人做完后，在群里发 /cpmatch，我们一起围观谁和谁最配。',
+                '',
+                '（管理员可以用 /cplang_group en|zh|ru 设置本群默认语言）',
+              ].join('\n')
+            : lang === 'ru'
+            ? [
+                `Добро пожаловать, ${mention}!`,
+                '',
+                'В этом чате есть бот для «кибер‑CP теста»:',
+                '1. Нажми на аватар бота и в личке жми «Start».',
+                '2. Вернись в чат и отправь /cpstart — я задам тебе 6 вопросов в личке.',
+                '3. Когда хотя бы двое пройдут тест, отправь /cpmatch, чтобы увидеть CP‑совпадения.',
+                '',
+                'Админ может выставить язык чата командой /cplang_group en|zh|ru.',
+              ].join('\n')
+            : [
+                `Welcome ${mention}!`,
+                '',
+                'This group has a “Cyber CP quiz” bot:',
+                '1. Tap the bot avatar and press “Start” in a private chat.',
+                '2. Come back here and send /cpstart — I will DM you 6 questions.',
+                '3. After at least two people finish, send /cpmatch in the group to see the CP ranking.',
+                '',
+                'Admins can set the group language with /cplang_group en|zh|ru.',
+              ].join('\n');
+
+        await sendCpMessage(msg.chat.id, textForGroup);
+      }
+
       if (msg.chat.type === 'private' && text.startsWith('/cplang')) {
         const parts = text.split(/\s+/);
         const langCode = (parts[1] || '').toLowerCase();
@@ -812,8 +913,106 @@ export async function POST(request: Request) {
         return NextResponse.json({ status: 'ok' });
       }
 
+      // 群语言设置：/cplang_group en|zh|ru
+      if (
+        (msg.chat.type === 'group' || msg.chat.type === 'supergroup') &&
+        text.startsWith('/cplang_group')
+      ) {
+        const parts = text.split(/\s+/);
+        const langCode = (parts[1] || '').toLowerCase();
+
+        let lang: CpLanguage | null = null;
+        if (langCode === 'en') lang = 'en';
+        if (langCode === 'zh' || langCode === 'cn' || langCode === 'zh-cn') lang = 'zh';
+        if (langCode === 'ru' || langCode === 'ru-ru') lang = 'ru';
+
+        if (!lang) {
+          const usage =
+            getUserLanguage(userId) === 'zh'
+              ? '用法：/cplang_group en|zh|ru，例如 /cplang_group zh'
+              : getUserLanguage(userId) === 'ru'
+              ? 'Использование: /cplang_group en|zh|ru, например /cplang_group en'
+              : 'Usage: /cplang_group en|zh|ru, e.g. /cplang_group en';
+          await sendCpMessage(msg.chat.id, usage);
+          return NextResponse.json({ status: 'ok' });
+        }
+
+        setGroupLanguage(msg.chat.id, lang);
+
+        const confirmText =
+          lang === 'zh'
+            ? '✅ 已将本群 CP bot 语言设置为：中文。'
+            : lang === 'ru'
+            ? '✅ Язык CP‑бота для этого чата установлен на русский.'
+            : '✅ Group CP bot language set to English.';
+
+        await sendCpMessage(msg.chat.id, confirmText);
+        return NextResponse.json({ status: 'ok' });
+      }
+
+      // 手动调出本群 CP bot 使用说明：/cpinfo
+      if (
+        (msg.chat.type === 'group' || msg.chat.type === 'supergroup') &&
+        text.startsWith('/cpinfo')
+      ) {
+        const lang = resolveLangForGroup(msg.chat.id, userId);
+        const botUsername = process.env.TELEGRAM_CP_BOT_USERNAME;
+        const botLink = botUsername ? `https://t.me/${botUsername}?start=cp` : '';
+
+        const textForGroup =
+          lang === 'zh'
+            ? [
+                '📌 本群赛博 CP 测试使用说明：',
+                '',
+                '这里有一只专门负责「搞 CP」的小功能 bot。',
+                botLink
+                  ? `先点这里跟我打个招呼：${botLink}`
+                  : '先点一下我的头像，在私聊里点「Start」跟我打个招呼。',
+                '',
+                '打过招呼之后：',
+                '· 在群里发送 /cpstart，我会私聊给你发 6 道赛博恋爱题目；',
+                '· 至少两个人做完后，在群里发 /cpmatch，我们一起围观谁和谁最配。',
+                '',
+                '（管理员可以用 /cplang_group en|zh|ru 设置本群默认语言）',
+              ].join('\n')
+            : lang === 'ru'
+            ? [
+                '📌 Как пользоваться CP‑ботом в этом чате:',
+                '',
+                'Здесь живёт бот для «кибер‑CP теста».',
+                botLink
+                  ? `Сначала нажми сюда, чтобы поздороваться со мной: ${botLink}`
+                  : 'Сначала нажми на мой аватар и в личке жми «Start».',
+                '',
+                'После этого:',
+                '· Отправь /cpstart в чат — я задам тебе 6 вопросов в личке;',
+                '· Когда хотя бы двое пройдут тест, отправь /cpmatch и посмотрим, кто с кем больше всего совпал.',
+                '',
+                'Админ может выставить язык чата командой /cplang_group en|zh|ru.',
+              ].join('\n')
+            : [
+                '📌 How to use the CP bot in this group:',
+                '',
+                'There is a “Cyber CP quiz” bot living here.',
+                botLink
+                  ? `First, say hi to me here: ${botLink}`
+                  : 'First, tap my avatar and press “Start” in a private chat.',
+                '',
+                'After that:',
+                '· Send /cpstart in the group and I will DM you 6 questions;',
+                '· Once at least two people finish, send /cpmatch to see who matches best.',
+                '',
+                'Admins can set the group language with /cplang_group en|zh|ru.',
+              ].join('\n');
+
+        await sendCpMessage(msg.chat.id, textForGroup);
+        return NextResponse.json({ status: 'ok' });
+      }
+
       if (text.startsWith('/cpstart')) {
-        const lang = getUserLanguage(userId);
+        const lang = msg.chat.type === 'private'
+          ? getUserLanguage(userId)
+          : resolveLangForGroup(msg.chat.id, userId);
         const isGroupChat =
           msg.chat.type === 'group' || msg.chat.type === 'supergroup';
 
@@ -1015,7 +1214,7 @@ export async function POST(request: Request) {
         (msg.chat.type === 'group' || msg.chat.type === 'supergroup') &&
         text.startsWith('/cpmatch')
       ) {
-        const lang = getUserLanguage(userId);
+        const lang = resolveLangForGroup(msg.chat.id, userId);
         const rows = getGroupProfilesStmt.all(msg.chat.id) as {
           user_id: number;
           username: string;

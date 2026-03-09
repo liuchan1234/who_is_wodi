@@ -42,6 +42,7 @@ export const runtime = 'nodejs';
 
 type CpQuestionId = 1 | 2 | 3 | 4 | 5 | 6;
 type CpAnswerOptionId = 1 | 2 | 3 | 4;
+type CpLanguage = 'en' | 'zh' | 'ru';
 
 interface CpSession {
   userId: number;
@@ -91,6 +92,15 @@ db.prepare(
 `
 ).run();
 
+db.prepare(
+  `
+  CREATE TABLE IF NOT EXISTS cp_user_lang (
+    user_id INTEGER PRIMARY KEY,
+    language TEXT NOT NULL
+  )
+`
+).run();
+
 const upsertSessionStmt = db.prepare(`
   INSERT INTO cp_sessions (user_id, username, current_question, answers_json, finished, last_updated)
   VALUES (@user_id, @username, @current_question, @answers_json, @finished, @last_updated)
@@ -117,6 +127,29 @@ const upsertProfileStmt = db.prepare(`
     created_at = excluded.created_at
 `);
 
+const getUserLangStmt = db.prepare(`
+  SELECT language
+  FROM cp_user_lang
+  WHERE user_id = ?
+`);
+
+const upsertUserLangStmt = db.prepare(`
+  INSERT INTO cp_user_lang (user_id, language)
+  VALUES (@user_id, @language)
+  ON CONFLICT(user_id) DO UPDATE SET
+    language = excluded.language
+`);
+
+const deleteSessionStmt = db.prepare(`
+  DELETE FROM cp_sessions
+  WHERE user_id = ?
+`);
+
+const deleteProfileStmt = db.prepare(`
+  DELETE FROM cp_profiles
+  WHERE user_id = ?
+`);
+
 // SQLite helpers
 
 function saveSession(session: CpSession) {
@@ -129,6 +162,28 @@ function saveSession(session: CpSession) {
     finished: session.finished ? 1 : 0,
     last_updated: session.lastUpdated,
   });
+}
+
+function resetUserCpData(userId: number) {
+  deleteSessionStmt.run(userId);
+  deleteProfileStmt.run(userId);
+}
+
+function getUserLanguage(userId: number): CpLanguage {
+  try {
+    const row = getUserLangStmt.get(userId) as { language: string } | undefined;
+    if (!row) return 'en';
+    if (row.language === 'zh' || row.language === 'ru' || row.language === 'en') {
+      return row.language;
+    }
+    return 'en';
+  } catch {
+    return 'en';
+  }
+}
+
+function setUserLanguage(userId: number, lang: CpLanguage) {
+  upsertUserLangStmt.run({ user_id: userId, language: lang });
 }
 
 function loadSession(userId: number): CpSession | null {
@@ -188,124 +243,260 @@ function saveProfile(profile: CpProfile) {
 
 interface CpQuestionConfig {
   id: CpQuestionId;
-  text: string;
-  options: { id: CpAnswerOptionId; label: string }[];
+  text: Record<CpLanguage, string>;
+  options: { id: CpAnswerOptionId; label: Record<CpLanguage, string> }[];
 }
 
 const QUESTIONS: CpQuestionConfig[] = [
   {
     id: 1,
-    text: [
-      '🇨🇳 你的赛博真身与猎物雷达是？',
-      '🇬🇧 Your cyber identity & target?',
-      '🇷🇺 Твой кибер-статус и цель кого ищешь?',
-    ].join('\n'),
+    text: {
+      zh: '🇨🇳 你的赛博真身与猎物雷达是？',
+      en: '🇬🇧 Your cyber identity & target?',
+      ru: '🇷🇺 Твой кибер-статус и цель кого ищешь?',
+    },
     options: [
-      { id: 1, label: '🐺 直男找妹子 / Straight Guy / Гетеро парень' },
-      { id: 2, label: '💃 直女找帅哥 / Straight Girl / Гетеро девушка' },
-      { id: 3, label: '🌈 男女通吃颜控 / Bi & Pan / Би и Пан (Мне всё равно)' },
-      { id: 4, label: '🍿 纯吃瓜不恋爱 / Just here for drama / Я тут только ради драмы' },
+      {
+        id: 1,
+        label: {
+          zh: '🐺 直男找妹子',
+          en: '🐺 Straight Guy (seeking girls)',
+          ru: '🐺 Гетеро парень (ищу девушку)',
+        },
+      },
+      {
+        id: 2,
+        label: {
+          zh: '💃 直女找帅哥',
+          en: '💃 Straight Girl (seeking guys)',
+          ru: '💃 Гетеро девушка (ищу парня)',
+        },
+      },
+      {
+        id: 3,
+        label: {
+          zh: '🌈 男女通吃颜控',
+          en: '🌈 Bi / Pan, face-obsessed',
+          ru: '🌈 Би / Пан, главное — внешность',
+        },
+      },
+      {
+        id: 4,
+        label: {
+          zh: '🍿 纯吃瓜不恋爱',
+          en: '🍿 Just here for drama',
+          ru: '🍿 Только ради драмы',
+        },
+      },
     ],
   },
   {
     id: 2,
-    text: [
-      '🇨🇳 你的真实心理年龄属于？',
-      "🇬🇧 What's your true mental age?",
-      '🇷🇺 Твой реальный ментальный возраст?',
-    ].join('\n'),
+    text: {
+      zh: '🇨🇳 你的真实心理年龄属于？',
+      en: "🇬🇧 What's your true mental age?",
+      ru: '🇷🇺 Твой реальный ментальный возраст?',
+    },
     options: [
       {
         id: 1,
-        label: '🌪️ 00后：整顿职场 / Gen Z: Chaotic / Зумер: Полный хаос',
+        label: {
+          zh: '🌪️ 00后：整顿职场',
+          en: '🌪️ Gen Z: chaotic reformers',
+          ru: '🌪️ Зумер: полный хаос',
+        },
       },
       {
         id: 2,
-        label: '☕ 90后：养生朋克 / Millennial: Tired / Миллениал: Вечно уставший',
+        label: {
+          zh: '☕ 90后：养生朋克',
+          en: '☕ Millennial: tired but surviving',
+          ru: '☕ Миллениал: вечно уставший',
+        },
       },
       {
         id: 3,
-        label: '🛑 80后：莫挨老子 / Gen X: Leave me alone / Бумер: Не трогай меня',
+        label: {
+          zh: '🛑 80后：莫挨老子',
+          en: "🛑 Gen X: don't bother me",
+          ru: '🛑 Бумер: не трогай меня',
+        },
       },
       {
         id: 4,
-        label: '🍼 小学生：清澈愚蠢 / Baby: Pure & Dumb / Ребенок: Чист и глуп',
+        label: {
+          zh: '🍼 小学生：清澈愚蠢',
+          en: '🍼 Kid: pure and silly',
+          ru: '🍼 Ребёнок: чистый и глупый',
+        },
       },
     ],
   },
   {
     id: 3,
-    text: [
-      '🇨🇳 你的星座属性是？',
-      '🇬🇧 Your Zodiac element?',
-      '🇷🇺 Твоя стихия Зодиака?',
-    ].join('\n'),
+    text: {
+      zh: '🇨🇳 你的星座属性是？',
+      en: '🇬🇧 Your Zodiac element?',
+      ru: '🇷🇺 Твоя стихия Зодиака?',
+    },
     options: [
       {
         id: 1,
-        label:
-          '🔥 火象：暴脾气 (白羊/狮子/射手) / Fire (Aries/Leo/Sag) / 🔥 Огонь (Вспыльчивый)',
+        label: {
+          zh: '🔥 火象：暴脾气 (白羊/狮子/射手)',
+          en: '🔥 Fire: hot-headed (Aries / Leo / Sag)',
+          ru: '🔥 Огонь: вспыльчивый (Овен / Лев / Стрелец)',
+        },
       },
       {
         id: 2,
-        label:
-          '🌍 土象：搞钱第一 (金牛/处女/摩羯) / Earth (Tau/Vir/Cap) / 🌍 Земля (Только деньги)',
+        label: {
+          zh: '🌍 土象：搞钱第一 (金牛/处女/摩羯)',
+          en: '🌍 Earth: money first (Taurus / Virgo / Capricorn)',
+          ru: '🌍 Земля: главное деньги (Телец / Дева / Козерог)',
+        },
       },
       {
         id: 3,
-        label:
-          '💨 风象：精神分裂 (双子/天秤/水瓶) / Air (Gem/Lib/Aqu) / 💨 Воздух (С шизой)',
+        label: {
+          zh: '💨 风象：精神分裂 (双子/天秤/水瓶)',
+          en: '💨 Air: chaotic mind (Gemini / Libra / Aquarius)',
+          ru: '💨 Воздух: шиза (Близнецы / Весы / Водолей)',
+        },
       },
       {
         id: 4,
-        label:
-          '💧 水象：恋爱脑 (巨蟹/天蝎/双鱼) / Water (Can/Sco/Pis) / 💧 Вода (Раб любви)',
+        label: {
+          zh: '💧 水象：恋爱脑 (巨蟹/天蝎/双鱼)',
+          en: '💧 Water: love-brained (Cancer / Scorpio / Pisces)',
+          ru: '💧 Вода: раб любви (Рак / Скорпион / Рыбы)',
+        },
       },
     ],
   },
   {
     id: 4,
-    text: [
-      '🇨🇳 你目前的社交精神状态？',
-      '🇬🇧 Your current social energy?',
-      '🇷🇺 Твое социальное состояние сейчас?',
-    ].join('\n'),
+    text: {
+      zh: '🇨🇳 你目前的社交精神状态？',
+      en: '🇬🇧 Your current social energy?',
+      ru: '🇷🇺 Твоё текущее социальное состояние?',
+    },
     options: [
-      { id: 1, label: '🦋 E人：社牛狂魔 / Extrovert / Экстраверт: Душа компании' },
-      { id: 2, label: '🦇 I人：阴暗爬行 / Introvert / Интроверт: Сижу в тени' },
-      { id: 3, label: '🧊 T人：冷血杀手 / Thinker / Мыслитель: Холодный разум' },
-      { id: 4, label: '😭 F人：眼泪机器 / Feeler / Чувствующий: Вечно в слезах' },
+      {
+        id: 1,
+        label: {
+          zh: '🦋 E人：社牛狂魔（外向）',
+          en: '🦋 Extrovert: social butterfly',
+          ru: '🦋 Экстраверт: душа компании',
+        },
+      },
+      {
+        id: 2,
+        label: {
+          zh: '🦇 I人：阴暗爬行（内向）',
+          en: '🦇 Introvert: hiding in the dark',
+          ru: '🦇 Интроверт: сижу в тени',
+        },
+      },
+      {
+        id: 3,
+        label: {
+          zh: '🧊 T人：冷血杀手（理性）',
+          en: '🧊 Thinker: cold logic',
+          ru: '🧊 Мыслитель: холодный разум',
+        },
+      },
+      {
+        id: 4,
+        label: {
+          zh: '😭 F人：眼泪机器（感性）',
+          en: '😭 Feeler: emotional fountain',
+          ru: '😭 Чувствующий: вечные слёзы',
+        },
+      },
     ],
   },
   {
     id: 5,
-    text: [
-      '🇨🇳 感情里你最大的缺点 (Red Flag)？',
-      '🇬🇧 Your biggest Red Flag? 🚩',
-      '🇷🇺 Твой главный Red Flag (Недостаток)? 🚩',
-    ].join('\n'),
+    text: {
+      zh: '🇨🇳 感情里你最大的缺点 (Red Flag)？',
+      en: '🇬🇧 Your biggest Red Flag in relationships? 🚩',
+      ru: '🇷🇺 Твой главный Red Flag в отношениях? 🚩',
+    },
     options: [
-      { id: 1, label: '😍 骨灰级颜控 / Total Simp for looks / Люблю только красивых' },
-      { id: 2, label: '🥶 忽冷忽热 / Hot & Cold player / То жарко, то холодно' },
-      { id: 3, label: '📱 查岗控制狂 / Control Freak / Маньяк контроля' },
-      { id: 4, label: '👻 秒下头跑路 / Ghosting Pro / Мастер гостинга (исчезаю)' },
+      {
+        id: 1,
+        label: {
+          zh: '😍 骨灰级颜控',
+          en: '😍 Extreme looks-only simp',
+          ru: '😍 Люблю только красивых',
+        },
+      },
+      {
+        id: 2,
+        label: {
+          zh: '🥶 忽冷忽热',
+          en: '🥶 Hot & cold behaviour',
+          ru: '🥶 То жарко, то холодно',
+        },
+      },
+      {
+        id: 3,
+        label: {
+          zh: '📱 查岗控制狂',
+          en: '📱 Control freak (checks everything)',
+          ru: '📱 Маньяк контроля',
+        },
+      },
+      {
+        id: 4,
+        label: {
+          zh: '👻 秒下头跑路',
+          en: '👻 Ghosting pro (disappears fast)',
+          ru: '👻 Мастер гостинга (исчезаю)',
+        },
+      },
     ],
   },
   {
     id: 6,
-    text: [
-      '🇨🇳 匹配成功后，奔现第一件事干嘛？',
-      '🇬🇧 First thing on your blind date?',
-      '🇷🇺 Первое дело на свидании вслепую?',
-    ].join('\n'),
+    text: {
+      zh: '🇨🇳 匹配成功后，奔现第一件事干嘛？',
+      en: '🇬🇧 First thing you do on a successful blind date?',
+      ru: '🇷🇺 Что ты сделаешь первым делом на удачном свидании вслепую?',
+    },
     options: [
-      { id: 1, label: '🥂 去酒吧灌醉对方 / Get wasted at a bar / Напоить друг друга в баре' },
-      { id: 2, label: '🎬 假装文艺看电影 / Boring movie date / Скучный фильм в кино' },
-      { id: 3, label: '🛏️ 懂的都懂直奔主题 / Skip to the bedroom / Сразу к делу в спальню' },
+      {
+        id: 1,
+        label: {
+          zh: '🥂 去酒吧灌醉对方',
+          en: '🥂 Go to a bar and get (both) drunk',
+          ru: '🥂 В бар — напоить друг друга',
+        },
+      },
+      {
+        id: 2,
+        label: {
+          zh: '🎬 假装文艺看电影',
+          en: '🎬 Pretend to be artsy and watch a movie',
+          ru: '🎬 Притвориться интеллигентом и пойти в кино',
+        },
+      },
+      {
+        id: 3,
+        label: {
+          zh: '🛏️ 懂的都懂直奔主题',
+          en: '🛏️ Go straight to the bedroom (you know)',
+          ru: '🛏️ Сразу к делу, в спальню',
+        },
+      },
       {
         id: 4,
-        label:
-          '🏃‍♂️ 借口上厕所死遁 / Fake an emergency & run / Сбежать через туалет',
+        label: {
+          zh: '🏃‍♂️ 借口上厕所死遁',
+          en: '🏃‍♂️ Fake an emergency and run away',
+          ru: '🏃‍♂️ Сбежать под предлогом туалета',
+        },
       },
     ],
   },
@@ -370,15 +561,16 @@ async function answerCallbackQuery(callbackQueryId: string) {
 
 async function sendQuestion(userId: number, questionId: CpQuestionId) {
   const q = getQuestionConfig(questionId);
+  const lang = getUserLanguage(userId);
 
-  await sendCpMessage(userId, q.text, {
+  await sendCpMessage(userId, q.text[lang] ?? q.text.en, {
     reply_markup: {
-      inline_keyboard: [
-        q.options.map((o) => ({
-          text: o.label,
+      inline_keyboard: q.options.map((o) => [
+        {
+          text: o.label[lang] ?? o.label.en,
           callback_data: `q${q.id}:${o.id}`, // e.g. "q1:3"
-        })),
-      ],
+        },
+      ]),
     },
   });
 }
@@ -453,6 +645,43 @@ export async function POST(request: Request) {
       const userId = from.id;
       const username = from.username || from.first_name;
 
+      if (msg.chat.type === 'private' && text.startsWith('/cplang')) {
+        const parts = text.split(/\s+/);
+        const langCode = (parts[1] || '').toLowerCase();
+
+        let lang: CpLanguage | null = null;
+        if (langCode === 'en') lang = 'en';
+        if (langCode === 'zh' || langCode === 'cn' || langCode === 'zh-cn') lang = 'zh';
+        if (langCode === 'ru' || langCode === 'ru-ru') lang = 'ru';
+
+        if (!lang) {
+          await sendCpMessage(
+            userId,
+            [
+              'Usage: /cplang en | zh | ru',
+              '',
+              'Examples:',
+              '/cplang en  - English (default)',
+              '/cplang zh  - 中文',
+              '/cplang ru  - Русский',
+            ].join('\n')
+          );
+          return NextResponse.json({ status: 'ok' });
+        }
+
+        setUserLanguage(userId, lang);
+
+        const confirmText =
+          lang === 'en'
+            ? '✅ Language set to English. Send /cpstart to begin the quiz.'
+            : lang === 'zh'
+            ? '✅ 已切换为中文文案。发送 /cpstart 开始 6 题测试。'
+            : '✅ Язык переключён на русский. Отправь /cpstart, чтобы начать тест.';
+
+        await sendCpMessage(userId, confirmText);
+        return NextResponse.json({ status: 'ok' });
+      }
+
       if (msg.chat.type === 'private' && text.startsWith('/cpstart')) {
         const session: CpSession = {
           userId,
@@ -471,6 +700,35 @@ export async function POST(request: Request) {
             '🚀 6 题赛博 CP 测试开始！',
             '',
             '接下来我会给你连发 6 道选择题，每题只有 4 个按钮，',
+            '全程只需要点按钮，不用打字，很快就能测出你的恋爱灾难体质。',
+          ].join('\n')
+        );
+
+        await sendQuestion(userId, 1);
+
+        return NextResponse.json({ status: 'ok' });
+      }
+
+      if (msg.chat.type === 'private' && text.startsWith('/cprestart')) {
+        resetUserCpData(userId);
+
+        const session: CpSession = {
+          userId,
+          username,
+          currentQuestion: 1,
+          answers: {},
+          finished: false,
+          lastUpdated: Date.now(),
+        };
+
+        saveSession(session);
+
+        await sendCpMessage(
+          userId,
+          [
+            '🔁 你的 CP 测试已重置，现在重新开始 6 题测验！',
+            '',
+            '接下来我会重新给你连发 6 道选择题，每题只有 4 个按钮，',
             '全程只需要点按钮，不用打字，很快就能测出你的恋爱灾难体质。',
           ].join('\n')
         );
@@ -543,11 +801,13 @@ export async function POST(request: Request) {
 
       session.answers[qid] = oid;
       session.lastUpdated = Date.now();
-      saveSession(session);
 
       if (qid < 6) {
         const nextQ = (qid + 1) as CpQuestionId;
         session.currentQuestion = nextQ;
+
+        // 保存更新后的当前题目进度
+        saveSession(session);
 
         if (cq.id) {
           await answerCallbackQuery(cq.id);
@@ -556,6 +816,9 @@ export async function POST(request: Request) {
         await sendQuestion(userId, nextQ);
       } else {
         session.finished = true;
+
+        // 保存完成状态与最终答案
+        saveSession(session);
 
         const fullAnswers: Record<CpQuestionId, CpAnswerOptionId> = {
           1: session.answers[1] ?? 1,

@@ -15,7 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { LoaderCircle, Shield, Sparkles, Swords } from "lucide-react";
+import { LoaderCircle, Send, Shield, Sparkles, Swords } from "lucide-react";
 
 export default function Home() {
   const [theme, setTheme] = useState("");
@@ -126,6 +126,42 @@ export default function Home() {
             </Card>
           </div>
         )}
+        
+        <Card className="w-full animate-in fade-in zoom-in-95 duration-500 delay-200 border-accent/20 bg-card/80 shadow-lg shadow-accent/10 backdrop-blur-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Send className="text-accent" />
+              <span>Connect Your Telegram Bot</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p>To use the DeepSpy bot in Telegram, you need to connect your bot to this running application.</p>
+            <div className="space-y-2">
+                <h3 className="font-semibold">Step 1: Get your Bot Token</h3>
+                <p className="text-sm text-muted-foreground">
+                    If you haven't already, talk to <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline-offset-4 hover:underline">@BotFather</a> on Telegram, create a new bot, and get your unique token. You should then add it to the <code>.env</code> file.
+                </p>
+            </div>
+            <div className="space-y-2">
+                <h3 className="font-semibold">Step 2: Set the Webhook</h3>
+                <p className="text-sm text-muted-foreground">
+                    You need to tell Telegram where to send messages. After deploying your app and getting a public URL, open your browser and go to the following URL. Make sure to replace the placeholders!
+                </p>
+                <pre className="mt-2 w-full overflow-x-auto rounded-md bg-background/50 p-4 text-sm">
+                    <code>
+                        https://api.telegram.org/bot&lt;YOUR_BOT_TOKEN&gt;/setWebhook?url=&lt;YOUR_APP_URL&gt;/api/webhook
+                    </code>
+                </pre>
+                <p className="text-xs text-muted-foreground">
+                    Replace <code>&lt;YOUR_BOT_TOKEN&gt;</code> with your token from BotFather.
+                    <br/>
+                    Replace <code>&lt;YOUR_APP_URL&gt;</code> with the public URL of this application.
+                </p>
+            </div>
+             <p className="text-sm">{'Once you see `{"ok":true,"result":true,"description":"Webhook was set"}`, your bot is ready to be added to a group chat!'}</p>
+          </CardContent>
+        </Card>
+
       </div>
       <footer className="absolute bottom-4 text-center text-sm text-muted-foreground">
         <p>

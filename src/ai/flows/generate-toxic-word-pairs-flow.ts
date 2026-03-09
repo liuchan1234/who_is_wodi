@@ -85,10 +85,7 @@ const generateToxicWordPairsFlow = ai.defineFlow(
     outputSchema: GenerateToxicWordPairsOutputSchema,
   },
   async (input) => {
-    const { output } = await ai.generate({
-      model: 'googleai/gemini-1.5-pro',
-      prompt: prompt.render(input),
-    });
+    const { output } = await prompt(input, { model: 'googleai/gemini-1.5-pro' });
     return output!;
   }
 );

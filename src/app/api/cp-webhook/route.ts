@@ -768,7 +768,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ status: 'ok' });
       }
 
-      if (msg.chat.type === 'private' && text.startsWith('/cpstart')) {
+      // 在群里或私聊输入 /cpstart 都会触发，
+      // 但真正的问卷流程始终走「私聊 userId」这一条。
+      if (text.startsWith('/cpstart')) {
         const lang = getUserLanguage(userId);
 
         // 先发一段使用说明，再开始测试

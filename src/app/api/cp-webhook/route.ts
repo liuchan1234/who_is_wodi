@@ -101,6 +101,18 @@ db.prepare(
 `
 ).run();
 
+db.prepare(
+  `
+  CREATE TABLE IF NOT EXISTS cp_group_users (
+    user_id INTEGER NOT NULL,
+    chat_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    last_seen INTEGER NOT NULL,
+    PRIMARY KEY (user_id, chat_id)
+  )
+`
+).run();
+
 const upsertSessionStmt = db.prepare(`
   INSERT INTO cp_sessions (user_id, username, current_question, answers_json, finished, last_updated)
   VALUES (@user_id, @username, @current_question, @answers_json, @finished, @last_updated)
@@ -150,6 +162,22 @@ const deleteProfileStmt = db.prepare(`
   WHERE user_id = ?
 `);
 
+const upsertGroupUserStmt = db.prepare(`
+  INSERT INTO cp_group_users (user_id, chat_id, username, last_seen)
+  VALUES (@user_id, @chat_id, @username, @last_seen)
+  ON CONFLICT(user_id, chat_id) DO UPDATE SET
+    username = excluded.username,
+    last_seen = excluded.last_seen
+`);
+
+const getGroupProfilesStmt = db.prepare(`
+  SELECT p.user_id, p.username, p.answers_json, p.created_at
+  FROM cp_profiles p
+  JOIN cp_group_users g
+    ON g.user_id = p.user_id
+  WHERE g.chat_id = ?
+`);
+
 // SQLite helpers
 
 function saveSession(session: CpSession) {
@@ -184,6 +212,15 @@ function getUserLanguage(userId: number): CpLanguage {
 
 function setUserLanguage(userId: number, lang: CpLanguage) {
   upsertUserLangStmt.run({ user_id: userId, language: lang });
+}
+
+function upsertGroupUser(userId: number, chatId: number, username: string) {
+  upsertGroupUserStmt.run({
+    user_id: userId,
+    chat_id: chatId,
+    username,
+    last_seen: Date.now(),
+  });
 }
 
 function loadSession(userId: number): CpSession | null {
@@ -516,7 +553,7 @@ async function sendCpMessage(chatId: number, text: string, extra: any = {}) {
   const token = process.env.TELEGRAM_CP_BOT_TOKEN;
   if (!token) {
     console.error('TELEGRAM_CP_BOT_TOKEN is not set');
-    return;
+    return null;
   }
 
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
@@ -537,8 +574,10 @@ async function sendCpMessage(chatId: number, text: string, extra: any = {}) {
       const body = await res.text();
       console.error('Failed to send CP message', res.status, body);
     }
+    return res;
   } catch (err) {
     console.error('Error sending CP message', err);
+    return null;
   }
 }
 
@@ -731,6 +770,11 @@ export async function POST(request: Request) {
       const userId = from.id;
       const username = from.username || from.first_name;
 
+      // 记录用户最近在哪个群使用过 CP 相关命令，用于群内匹配
+      if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
+        upsertGroupUser(userId, msg.chat.id, username);
+      }
+
       if (msg.chat.type === 'private' && text.startsWith('/cplang')) {
         const parts = text.split(/\s+/);
         const langCode = (parts[1] || '').toLowerCase();
@@ -768,51 +812,58 @@ export async function POST(request: Request) {
         return NextResponse.json({ status: 'ok' });
       }
 
-      // 在群里或私聊输入 /cpstart 都会触发，
-      // 但真正的问卷流程始终走「私聊 userId」这一条。
       if (text.startsWith('/cpstart')) {
         const lang = getUserLanguage(userId);
+        const isGroupChat =
+          msg.chat.type === 'group' || msg.chat.type === 'supergroup';
 
         // 先发一段使用说明，再开始测试
-        if (lang === 'zh') {
-          await sendCpMessage(
-            userId,
-            [
-              '📖 使用说明：',
-              '',
-              '· 一共 6 道单选题，每题 4 个按钮，只能点一次不能反悔。',
-              '· 做题过程中如果想重来，可以发送 /cprestart 重置本次测试。',
-              '· 如果想切换语言，可以用命令：/cplang en | zh | ru。',
-              '',
-              '准备好了我就开始发题了～',
-            ].join('\n')
-          );
-        } else if (lang === 'ru') {
-          await sendCpMessage(
-            userId,
-            [
-              '📖 Как это работает:',
-              '',
-              '· Всего 6 вопросов с 4 вариантами, один выбор без отмены.',
-              '· Если хочешь начать заново, отправь /cprestart.',
-              '· Чтобы сменить язык: /cplang en | zh | ru.',
-              '',
-              'Если готов — я начну задавать вопросы.',
-            ].join('\n')
-          );
+        const introText =
+          lang === 'zh'
+            ? [
+                '📖 使用说明：',
+                '',
+                '· 一共 6 道单选题，每题 4 个按钮，只能点一次不能反悔。',
+                '· 做题过程中如果想重来，可以发送 /cprestart 重置本次测试。',
+                '· 如果想切换语言，可以用命令：/cplang en | zh | ru。',
+                '',
+                '准备好了我就开始发题了～',
+              ].join('\n')
+            : lang === 'ru'
+            ? [
+                '📖 Как это работает:',
+                '',
+                '· Всего 6 вопросов с 4 вариантами, один выбор без отмены.',
+                '· Если хочешь начать заново, отправь /cprestart.',
+                '· Чтобы сменить язык: /cplang en | zh | ru.',
+                '',
+                'Если готов — я начну задавать вопросы.',
+              ].join('\n')
+            : [
+                '📖 How this works:',
+                '',
+                '· There are 6 multiple‑choice questions, 4 buttons each, one tap only.',
+                '· If you want to restart during the quiz, send /cprestart.',
+                '· To switch language: /cplang en | zh | ru.',
+                '',
+                "If you're ready, I'll start the quiz now.",
+              ].join('\n');
+
+        // 群里触发时，如果 bot 还没法私聊用户，会在群里提示先点 Start
+        if (isGroupChat) {
+          const res = await sendCpMessage(userId, introText);
+          if (!res || !res.ok) {
+            const fallbackText =
+              lang === 'zh'
+                ? `@${username} 请先点开跟我的私聊窗口，点击「Start」或随便发一句话，然后再在群里发送 /cpstart，我才能私聊把题目发给你～`
+                : lang === 'ru'
+                ? `@${username} сначала открой личный чат со мной и нажми «Start» (или напиши любое сообщение), а потом снова отправь /cpstart в группу — тогда я смогу писать тебе в личку.`
+                : `@${username} please first open a private chat with me and press "Start" (or send any message), then send /cpstart in the group again so I can DM you the quiz.`;
+            await sendCpMessage(msg.chat.id, fallbackText);
+            return NextResponse.json({ status: 'ok' });
+          }
         } else {
-          await sendCpMessage(
-            userId,
-            [
-              '📖 How this works:',
-              '',
-              '· There are 6 multiple‑choice questions, 4 buttons each, one tap only.',
-              '· If you want to restart during the quiz, send /cprestart.',
-              '· To switch language: /cplang en | zh | ru.',
-              '',
-              "If you're ready, I\'ll start the quiz now.",
-            ].join('\n')
-          );
+          await sendCpMessage(userId, introText);
         }
 
         const session: CpSession = {
@@ -956,6 +1007,140 @@ export async function POST(request: Request) {
             ].join('\n')
           );
         }
+        return NextResponse.json({ status: 'ok' });
+      }
+
+      // 群内触发匹配：从当前群里已经做完问卷的人中，选出匹配度最高的 CP
+      if (
+        (msg.chat.type === 'group' || msg.chat.type === 'supergroup') &&
+        text.startsWith('/cpmatch')
+      ) {
+        const lang = getUserLanguage(userId);
+        const rows = getGroupProfilesStmt.all(msg.chat.id) as {
+          user_id: number;
+          username: string;
+          answers_json: string;
+          created_at: number;
+        }[];
+
+        if (!rows || rows.length < 2) {
+          const txt =
+            lang === 'zh'
+              ? '这个群里目前做完问卷的人还不到两位，没法配 CP。大家先去发 /cpstart 做一份。'
+              : lang === 'ru'
+              ? 'В этом чате заполнили тест меньше двух человек. Пусть сначала хотя бы двое отправят /cpstart и пройдут тест.'
+              : 'Fewer than two people in this group have finished the quiz. Ask at least two members to run /cpstart first.';
+          await sendCpMessage(msg.chat.id, txt);
+          return NextResponse.json({ status: 'ok' });
+        }
+
+        const profiles = rows.map((r) => {
+          let parsed: Record<CpQuestionId, CpAnswerOptionId> = {
+            1: 1,
+            2: 1,
+            3: 1,
+            4: 1,
+            5: 1,
+            6: 1,
+          };
+          try {
+            const obj = JSON.parse(r.answers_json) as Record<string, number>;
+            (['1', '2', '3', '4', '5', '6'] as const).forEach((k) => {
+              const n = Number(k) as CpQuestionId;
+              const v = obj[k];
+              if (v === 1 || v === 2 || v === 3 || v === 4) {
+                parsed[n] = v;
+              }
+            });
+          } catch {
+            // ignore parse error, keep defaults
+          }
+          return {
+            userId: r.user_id,
+            username: r.username,
+            answers: parsed,
+            createdAt: r.created_at,
+          };
+        });
+
+        type Pair = {
+          a: (typeof profiles)[number];
+          b: (typeof profiles)[number];
+          score: number;
+        };
+
+        const pairs: Pair[] = [];
+        for (let i = 0; i < profiles.length; i++) {
+          for (let j = i + 1; j < profiles.length; j++) {
+            const p1 = profiles[i];
+            const p2 = profiles[j];
+            let score = 0;
+            ([
+              1, 2, 3, 4, 5, 6,
+            ] as CpQuestionId[]).forEach((q) => {
+              if (p1.answers[q] === p2.answers[q]) {
+                score += 1;
+              }
+            });
+            pairs.push({ a: p1, b: p2, score });
+          }
+        }
+
+        if (!pairs.length) {
+          const txt =
+            lang === 'zh'
+              ? '这个群里虽然有人做了问卷，但暂时算不出有效的配对。'
+              : lang === 'ru'
+              ? 'В чате есть ответы, но не удалось построить пары для совпадения.'
+              : 'There are some quiz results, but I could not build any valid pairs.';
+          await sendCpMessage(msg.chat.id, txt);
+          return NextResponse.json({ status: 'ok' });
+        }
+
+        pairs.sort((p1, p2) => {
+          if (p2.score !== p1.score) return p2.score - p1.score;
+          // tie-breaker: newer profiles first
+          const latest1 = Math.max(p1.a.createdAt, p1.b.createdAt);
+          const latest2 = Math.max(p2.a.createdAt, p2.b.createdAt);
+          return latest2 - latest1;
+        });
+
+        const top = pairs.slice(0, 3);
+
+        const formatLine = (p: Pair, idx: number): string => {
+          const scoreText =
+            lang === 'zh'
+              ? `匹配度：${p.score}/6`
+              : lang === 'ru'
+              ? `совпадений: ${p.score}/6`
+              : `score: ${p.score}/6`;
+          const label =
+            lang === 'zh'
+              ? `第 ${idx} 名：@${p.a.username || p.a.userId}  ×  @${p.b.username || p.b.userId}（${scoreText}）`
+              : lang === 'ru'
+              ? `${idx}-е место: @${p.a.username || p.a.userId} × @${p.b.username || p.b.userId} (${scoreText})`
+              : `#${idx}: @${p.a.username || p.a.userId} × @${p.b.username || p.b.userId} (${scoreText})`;
+          return `• ${label}`;
+        };
+
+        const header =
+          lang === 'zh'
+            ? '💘 本群 CP 匹配榜（基于 6 题问卷，相同答案越多，匹配度越高）：'
+            : lang === 'ru'
+            ? '💘 Таблица CP‑совпадений в этом чате (чем больше одинаковых ответов, тем выше счёт):'
+            : '💘 CP match ranking for this group (more identical answers → higher score):';
+
+        const footer =
+          lang === 'zh'
+            ? '想上榜，先自己发 /cpstart 做一份问卷。'
+            : lang === 'ru'
+            ? 'Хочешь попасть в список — сначала пройди тест через /cpstart.'
+            : 'Want to appear here? Run /cpstart and finish the quiz first.';
+
+        const bodyLines = top.map((p, idx) => formatLine(p, idx + 1));
+
+        const fullText = [header, '', ...bodyLines, '', footer].join('\n');
+        await sendCpMessage(msg.chat.id, fullText);
         return NextResponse.json({ status: 'ok' });
       }
     }

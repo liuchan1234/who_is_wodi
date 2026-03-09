@@ -579,53 +579,139 @@ async function sendQuestion(userId: number, questionId: CpQuestionId) {
 
 function buildHumanReport(
   answers: Record<CpQuestionId, CpAnswerOptionId>,
-  username: string
+  username: string,
+  lang: CpLanguage
 ): string {
-  const genderMap: Record<CpAnswerOptionId, string> = {
+  const genderMapZh: Record<CpAnswerOptionId, string> = {
     1: '直男，雷达只对长发飘飘有信号',
     2: '直女，专盯人间清俊帅哥',
     3: '颜控双箭头，只尊重高颜值碳基生物',
     4: '纯吃瓜旁观者，本人不下场只点评',
   };
+  const genderMapEn: Record<CpAnswerOptionId, string> = {
+    1: 'a straight guy whose radar only locks on long hair',
+    2: 'a straight girl only scanning for handsome faces',
+    3: 'a face-obsessed bi/pan who worships good-looking humans',
+    4: 'a pure spectator, here only to eat popcorn and comment',
+  };
+  const genderMapRu: Record<CpAnswerOptionId, string> = {
+    1: 'гетеро парень, радар срабатывает только на длинные волосы',
+    2: 'гетеро девушка, охотится только за красивыми парнями',
+    3: 'би/пан, для которого главное — красивое лицо',
+    4: 'наблюдатель, который только смотрит и комментирует',
+  };
+  const genderMap =
+    lang === 'zh' ? genderMapZh : lang === 'ru' ? genderMapRu : genderMapEn;
 
-  const ageMap: Record<CpAnswerOptionId, string> = {
+  const ageMapZh: Record<CpAnswerOptionId, string> = {
     1: '00 后整顿职场，嘴上说躺平，手里简历递得比谁都快',
     2: '90 后养生朋克，保温杯里泡枸杞，一边 emo 一边还在打工',
     3: '80 后防御塔，心里只有「别来烦我」五个字',
     4: '精神小学生，清澈又愚蠢，对一切修罗场充满好奇',
   };
+  const ageMapEn: Record<CpAnswerOptionId, string> = {
+    1: "a Gen Z office reformer, yelling 'I quit' while secretly sending CVs",
+    2: 'a millennial wellness punk with goji berries in a thermos, still overworked and emo',
+    3: 'a defensive Gen X tower whose inner voice just says “do not disturb”',
+    4: 'mentally a curious kid, pure and eager for every new drama',
+  };
+  const ageMapRu: Record<CpAnswerOptionId, string> = {
+    1: 'зумер, который «увольняется», но тихо рассылает резюме',
+    2: 'миллениал с термосом и ягодами, вечно уставший, но всё ещё пашет',
+    3: 'бумер-башня, у которого в голове только «только не трогайте меня»',
+    4: 'умственно ребёнок: чистый, наивный и очень любопытный до драмы',
+  };
+  const ageMap =
+    lang === 'zh' ? ageMapZh : lang === 'ru' ? ageMapRu : ageMapEn;
 
-  const redFlagMap: Record<CpAnswerOptionId, string> = {
+  const redFlagMapZh: Record<CpAnswerOptionId, string> = {
     1: '骨灰级颜控：长得好看就都是对的，三观可以后补',
     2: '忽冷忽热：聊天秒回三天，消失也能三天三夜',
     3: '查岗控制狂：在意对方到连外卖骑手都要吃醋',
     4: '秒下头跑路：一旦对方说错一句话，你就立刻人间蒸发',
   };
+  const redFlagMapEn: Record<CpAnswerOptionId, string> = {
+    1: 'hardcore looks-only mode: if they look good, everything is forgiven',
+    2: 'hot-and-cold: three days of instant replies, then three days of silence',
+    3: 'a control freak who even gets jealous of the delivery driver',
+    4: 'a ghosting sprinter: one wrong sentence and you vanish from the planet',
+  };
+  const redFlagMapRu: Record<CpAnswerOptionId, string> = {
+    1: 'жёсткий фейс-контроль: если красивый — всё можно простить',
+    2: 'то жарко, то холодно: три дня отвечает мгновенно, три дня пропадает',
+    3: 'маньяк контроля, который ревнует даже к курьеру',
+    4: 'мастер гостинга: одно неверное слово — и ты исчезаешь',
+  };
+  const redFlagMap =
+    lang === 'zh' ? redFlagMapZh : lang === 'ru' ? redFlagMapRu : redFlagMapEn;
 
-  const actionMap: Record<CpAnswerOptionId, string> = {
+  const actionMapZh: Record<CpAnswerOptionId, string> = {
     1: '第一回合就拉去喝酒，心里想着「要么假装醉，要么把对方灌醉」。',
     2: '强行安排文艺电影，结果全程在黑暗里刷手机看梗图。',
     3: '刚见面十分钟就试探「要不要去你家坐坐？」',
     4: '一边说「我去下个洗手间」，一边已经在拼车界面点了回家的车。',
   };
+  const actionMapEn: Record<CpAnswerOptionId, string> = {
+    1: 'drag them to a bar in round one, planning who will “accidentally” get drunk first.',
+    2: 'schedule an “artsy” movie but secretly scroll memes in the dark.',
+    3: 'after ten minutes you are already testing the waters with “should we go to your place?”.',
+    4: 'say “I’ll just use the bathroom” while ordering a ride home on your phone.',
+  };
+  const actionMapRu: Record<CpAnswerOptionId, string> = {
+    1: 'сразу тащишь в бар, заранее решая, кто «случайно» напьётся первым.',
+    2: 'назначаешь «интеллигентное» кино, но весь фильм листаешь мемы в темноте.',
+    3: 'через десять минут уже спрашиваешь: «может, поедем к тебе?».',
+    4: 'говоришь «я в туалет» и параллельно вызываешь такси домой.',
+  };
+  const actionMap =
+    lang === 'zh' ? actionMapZh : lang === 'ru' ? actionMapRu : actionMapEn;
 
   const a1 = genderMap[answers[1]];
   const a2 = ageMap[answers[2]];
   const a5 = redFlagMap[answers[5]];
   const a6 = actionMap[answers[6]];
 
+  if (lang === 'zh') {
+    const lines = [
+      `👤 *${username} 的赛博 CP 测试档案*`,
+      '',
+      `你是一个 ${a1}，心理年龄走向：${a2}。`,
+      `感情里的最大 Red Flag：${a5}。`,
+      '',
+      '如果你和群友成功匹配，第一场奔现约会大概率是这样展开的：',
+      a6,
+      '',
+      '—— 这份问卷结果会被用来和群友做「谁和谁才是真 CP」匹配，记得拉大家都来做一份。',
+    ];
+    return lines.join('\n');
+  }
+
+  if (lang === 'ru') {
+    const lines = [
+      `👤 *Кибер-CP профиль ${username}*`,
+      '',
+      `Ты — ${a1}, а твой ментальный возраст: ${a2}.`,
+      `Твой главный Red Flag в отношениях: ${a5}.`,
+      '',
+      'Если вас с кем‑то из чата сведёт судьба, первое свидание, скорее всего, пройдёт так:',
+      a6,
+      '',
+      '—— Этот результат будет использоваться, чтобы подбирать, кто с кем настоящий CP. Затащи друзей тоже пройти тест.',
+    ];
+    return lines.join('\n');
+  }
+
   const lines = [
-    `👤 *${username} 的赛博 CP 测试档案*`,
+    `👤 *${username}'s Cyber CP Profile*`,
     '',
-    `你是一个 ${a1}，心理年龄走向：${a2}。`,
-    `感情里的最大 Red Flag：${a5}。`,
+    `You are ${a1}, with a mental-age vibe of: ${a2}.`,
+    `Your biggest relationship Red Flag: ${a5}.`,
     '',
-    '如果你和群友成功匹配，第一场奔现约会大概率是这样展开的：',
+    'If you and someone from the group actually match, your first offline date will probably look like this:',
     a6,
     '',
-    '—— 这份问卷结果会被用来和群友做「谁和谁才是真 CP」匹配，记得拉大家都来做一份。',
+    '—— This quiz result will be used to match “who is the real CP with whom” in the group. Make sure everyone takes it.',
   ];
-
   return lines.join('\n');
 }
 
@@ -683,6 +769,50 @@ export async function POST(request: Request) {
       }
 
       if (msg.chat.type === 'private' && text.startsWith('/cpstart')) {
+        const lang = getUserLanguage(userId);
+
+        // 先发一段使用说明，再开始测试
+        if (lang === 'zh') {
+          await sendCpMessage(
+            userId,
+            [
+              '📖 使用说明：',
+              '',
+              '· 一共 6 道单选题，每题 4 个按钮，只能点一次不能反悔。',
+              '· 做题过程中如果想重来，可以发送 /cprestart 重置本次测试。',
+              '· 如果想切换语言，可以用命令：/cplang en | zh | ru。',
+              '',
+              '准备好了我就开始发题了～',
+            ].join('\n')
+          );
+        } else if (lang === 'ru') {
+          await sendCpMessage(
+            userId,
+            [
+              '📖 Как это работает:',
+              '',
+              '· Всего 6 вопросов с 4 вариантами, один выбор без отмены.',
+              '· Если хочешь начать заново, отправь /cprestart.',
+              '· Чтобы сменить язык: /cplang en | zh | ru.',
+              '',
+              'Если готов — я начну задавать вопросы.',
+            ].join('\n')
+          );
+        } else {
+          await sendCpMessage(
+            userId,
+            [
+              '📖 How this works:',
+              '',
+              '· There are 6 multiple‑choice questions, 4 buttons each, one tap only.',
+              '· If you want to restart during the quiz, send /cprestart.',
+              '· To switch language: /cplang en | zh | ru.',
+              '',
+              "If you're ready, I\'ll start the quiz now.",
+            ].join('\n')
+          );
+        }
+
         const session: CpSession = {
           userId,
           username,
@@ -694,15 +824,37 @@ export async function POST(request: Request) {
 
         saveSession(session);
 
-        await sendCpMessage(
-          userId,
-          [
-            '🚀 6 题赛博 CP 测试开始！',
-            '',
-            '接下来我会给你连发 6 道选择题，每题只有 4 个按钮，',
-            '全程只需要点按钮，不用打字，很快就能测出你的恋爱灾难体质。',
-          ].join('\n')
-        );
+        if (lang === 'zh') {
+          await sendCpMessage(
+            userId,
+            [
+              '🚀 6 题赛博 CP 测试开始！',
+              '',
+              '接下来我会给你连发 6 道选择题，每题只有 4 个按钮，',
+              '全程只需要点按钮，不用打字，很快就能测出你的恋爱灾难体质。',
+            ].join('\n')
+          );
+        } else if (lang === 'ru') {
+          await sendCpMessage(
+            userId,
+            [
+              '🚀 Стартуем кибер-CP тест из 6 вопросов!',
+              '',
+              'Я отправлю тебе 6 вопросов с четырьмя кнопками каждый.',
+              'Нужно только нажимать кнопки — ничего писать не придётся.',
+            ].join('\n')
+          );
+        } else {
+          await sendCpMessage(
+            userId,
+            [
+              '🚀 Starting the 6‑question Cyber CP quiz!',
+              '',
+              'I will send you 6 multiple‑choice questions, each with 4 buttons.',
+              'You only need to tap buttons — no typing required.',
+            ].join('\n')
+          );
+        }
 
         await sendQuestion(userId, 1);
 
@@ -712,6 +864,8 @@ export async function POST(request: Request) {
       if (msg.chat.type === 'private' && text.startsWith('/cprestart')) {
         resetUserCpData(userId);
 
+        const lang = getUserLanguage(userId);
+
         const session: CpSession = {
           userId,
           username,
@@ -723,15 +877,35 @@ export async function POST(request: Request) {
 
         saveSession(session);
 
-        await sendCpMessage(
-          userId,
-          [
-            '🔁 你的 CP 测试已重置，现在重新开始 6 题测验！',
-            '',
-            '接下来我会重新给你连发 6 道选择题，每题只有 4 个按钮，',
-            '全程只需要点按钮，不用打字，很快就能测出你的恋爱灾难体质。',
-          ].join('\n')
-        );
+        if (lang === 'zh') {
+          await sendCpMessage(
+            userId,
+            [
+              '🔁 你的 CP 测试已重置，现在重新开始 6 题测验！',
+              '',
+              '接下来我会重新给你连发 6 道选择题，每题只有 4 个按钮，',
+              '全程只需要点按钮，不用打字，很快就能测出你的恋爱灾难体质。',
+            ].join('\n')
+          );
+        } else if (lang === 'ru') {
+          await sendCpMessage(
+            userId,
+            [
+              '🔁 Твой CP‑тест сброшен. Начинаем заново 6 вопросов!',
+              '',
+              'Снова пришлю 6 вопросов по 4 варианта, нужно просто нажимать кнопки.',
+            ].join('\n')
+          );
+        } else {
+          await sendCpMessage(
+            userId,
+            [
+              '🔁 Your CP quiz has been reset. Starting the 6‑question test again!',
+              '',
+              'I will resend all 6 questions with 4 buttons each. Just tap the buttons, no typing needed.',
+            ].join('\n')
+          );
+        }
 
         await sendQuestion(userId, 1);
 
@@ -742,17 +916,44 @@ export async function POST(request: Request) {
         msg.chat.type === 'private' &&
         (text.startsWith('/cphelp') || text.startsWith('/start'))
       ) {
-        await sendCpMessage(
-          userId,
-          [
-            '这是一个专门用来测试「你和群友谁才是真 CP」的 bot 👀',
-            '',
-            '在这里私聊我发送：',
-            '/cpstart',
-            '就可以开始 6 题测试。',
-          ].join('\n')
-        );
-
+        const lang = getUserLanguage(userId);
+        if (lang === 'zh') {
+          await sendCpMessage(
+            userId,
+            [
+              '这是一个专门用来测试「你和群友谁才是真 CP」的 bot 👀',
+              '',
+              '基础用法：',
+              '· 发送 /cpstart 开始 6 题测试',
+              '· 发送 /cprestart 重置当前测试重新来过',
+              '· 发送 /cplang en|zh|ru 切换语言（默认英文）',
+            ].join('\n')
+          );
+        } else if (lang === 'ru') {
+          await sendCpMessage(
+            userId,
+            [
+              'Это бот, который тестирует «кто с кем настоящий CP» в чате 👀',
+              '',
+              'Как пользоваться:',
+              '· /cpstart — начать тест из 6 вопросов',
+              '· /cprestart — сбросить текущий тест и начать заново',
+              '· /cplang en|zh|ru — переключить язык (по умолчанию английский)',
+            ].join('\n')
+          );
+        } else {
+          await sendCpMessage(
+            userId,
+            [
+              'This bot tests “who is the real CP with whom” in your group 👀',
+              '',
+              'How to use:',
+              '· /cpstart — start the 6‑question quiz',
+              '· /cprestart — reset your current quiz and start over',
+              '· /cplang en|zh|ru — switch language (default is English)',
+            ].join('\n')
+          );
+        }
         return NextResponse.json({ status: 'ok' });
       }
     }
@@ -781,9 +982,16 @@ export async function POST(request: Request) {
         if (cq.id) {
           await answerCallbackQuery(cq.id);
         }
+        const lang = getUserLanguage(userId);
+        const msgText =
+          lang === 'zh'
+            ? '当前没有进行中的测试，可以发送 /cpstart 重新做一份。'
+            : lang === 'ru'
+            ? 'Сейчас нет активного теста. Отправь /cpstart, чтобы пройти его заново.'
+            : 'There is no active quiz right now. Send /cpstart to start a new one.';
         await sendCpMessage(
           userId,
-          '当前没有进行中的测试，可以发送 /cpstart 重新做一份。'
+          msgText
         );
         return NextResponse.json({ status: 'ok' });
       }
@@ -792,9 +1000,16 @@ export async function POST(request: Request) {
         if (cq.id) {
           await answerCallbackQuery(cq.id);
         }
+        const lang = getUserLanguage(userId);
+        const msgText =
+          lang === 'zh'
+            ? '这道题已经记好了，请直接看我刚发给你的最新一题按钮～'
+            : lang === 'ru'
+            ? 'Ответ на этот вопрос уже сохранён. Нажми кнопку у самого нового сообщения.'
+            : 'Your answer to this question is already saved. Please use the buttons on my latest message.';
         await sendCpMessage(
           userId,
-          '这道题已经记好了，请直接看我刚发给你的最新一题按钮～'
+          msgText
         );
         return NextResponse.json({ status: 'ok' });
       }
@@ -840,7 +1055,8 @@ export async function POST(request: Request) {
           await answerCallbackQuery(cq.id);
         }
 
-        const report = buildHumanReport(fullAnswers, session.username);
+        const lang = getUserLanguage(userId);
+        const report = buildHumanReport(fullAnswers, session.username, lang);
         await sendCpMessage(userId, report);
       }
 

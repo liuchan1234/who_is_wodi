@@ -7,8 +7,7 @@
  * - GenerateToxicWordPairsOutput - The return type for the generateToxicWordPairs function.
  */
 
-import { ai } from '@/ai/genkit';
-import { z } from 'genkit';
+import { z } from 'zod';
 
 const GenerateToxicWordPairsInputSchema = z
   .object({
@@ -42,50 +41,132 @@ export type GenerateToxicWordPairsOutput = z.infer<
   typeof GenerateToxicWordPairsOutputSchema
 >;
 
+const DeepseekWordPairsResponseSchema = z.object({
+  pairs: z
+    .array(GenerateToxicWordPairsOutputSchema)
+    .min(1)
+    .max(10)
+    .describe('A list of candidate word pairs to choose from.'),
+});
+
+type DeepseekWordPairsResponse = z.infer<typeof DeepseekWordPairsResponseSchema>;
+
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
+
+async function callDeepseekForToxicWordPairs(
+  input: GenerateToxicWordPairsInput
+): Promise<GenerateToxicWordPairsOutput> {
+  if (!DEEPSEEK_API_KEY) {
+    throw new Error(
+      'DEEPSEEK_API_KEY is not set. Please add it to your environment variables.'
+    );
+  }
+
+  const parsedInput = GenerateToxicWordPairsInputSchema.parse(input);
+
+  const fallbackThemes = [
+    'food',
+    'animals',
+    'jobs',
+    'sports',
+    'school',
+    'travel',
+    'technology',
+    'music',
+    'movies',
+    'household items',
+  ] as const;
+
+  const effectiveTheme =
+    parsedInput.theme ??
+    fallbackThemes[Math.floor(Math.random() * fallbackThemes.length)];
+
+  const systemPrompt =
+    "You are an expert at generating challenging and creative word pairs for the game 'Who is the Undercover Agent?'. " +
+    "Your task is to generate two words that are closely related but distinct enough to cause confusion and discussion among players. " +
+    "One word will be for the 'civilian' and the other for the 'undercover' agent. " +
+    "The words should be common enough to be describable but tricky to differentiate without knowing the other word. " +
+    "Aim for a 'toxic' feel, meaning they should provoke thought and potentially mislead players. " +
+    'Always respond strictly as a JSON object matching the specified schema. ' +
+    'Avoid repeating the exact same words across different pairs; ensure variety within the chosen theme.';
+
+  const themeInstruction = effectiveTheme
+    ? `Generate several different pairs of words related to the theme: "${effectiveTheme}". Try to cover different sub-areas of this theme.`
+    : 'Generate several general pairs of words.';
+
+  const userPrompt = [
+    'Generate 5 different word pairs for the Undercover game.',
+    'Example:',
+    'Civilian: Chair',
+    'Undercover: Stool',
+    '',
+    'Example:',
+    'Civilian: Ocean',
+    'Undercover: Sea',
+    '',
+    themeInstruction,
+    '',
+    'Return only JSON with the following shape:',
+    '{ "pairs": [ { "civilianWord": string, "undercoverWord": string }, ... ] }',
+  ].join('\n');
+
+  const response = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: DEEPSEEK_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.8,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `DeepSeek API request failed with status ${response.status}: ${errorText}`
+    );
+  }
+
+  const data = (await response.json()) as {
+    choices?: { message?: { content?: unknown } }[];
+  };
+
+  const content = data.choices?.[0]?.message?.content;
+
+  if (!content) {
+    throw new Error('DeepSeek API returned an empty response.');
+  }
+
+  let parsedOutput: unknown;
+
+  if (typeof content === 'string') {
+    parsedOutput = JSON.parse(content);
+  } else {
+    parsedOutput = content;
+  }
+
+  // Prefer the new multi-pair format; fall back to single pair if needed
+  const multiResult = DeepseekWordPairsResponseSchema.safeParse(parsedOutput);
+  if (multiResult.success) {
+    const pairs = multiResult.data.pairs;
+    const randomIndex = Math.floor(Math.random() * pairs.length);
+    return pairs[randomIndex];
+  }
+
+  // Backward compatibility in case the model returns a single pair
+  return GenerateToxicWordPairsOutputSchema.parse(parsedOutput);
+}
+
 export async function generateToxicWordPairs(
   input: GenerateToxicWordPairsInput
 ): Promise<GenerateToxicWordPairsOutput> {
-  return generateToxicWordPairsFlow(input);
+  return callDeepseekForToxicWordPairs(input);
 }
-
-const prompt = ai.definePrompt({
-  name: 'generateToxicWordPairsPrompt',
-  input: { schema: GenerateToxicWordPairsInputSchema },
-  output: { schema: GenerateToxicWordPairsOutputSchema },
-  prompt: `You are an expert at generating challenging and creative word pairs for the game 'Who is the Undercover Agent?'.
-Your task is to generate two words that are closely related but distinct enough to cause confusion and discussion among players. One word will be for the 'civilian' and the other for the 'undercover' agent.
-
-Instructions:
-- Generate a pair of words that are subtly different but easily confusable in a game context.
-- The words should be common enough to be describable but tricky to differentiate without knowing the other word.
-- Aim for a 'toxic' feel, meaning they should provoke thought and potentially mislead players.
-- If a theme is provided, try to adhere to it.
-
-Example:
-Civilian: Chair
-Undercover: Stool
-
-Example:
-Civilian: Ocean
-Undercover: Sea
-
-{{#if theme}}
-Generate a pair of words related to the theme: {{{theme}}}.
-{{else}}
-Generate a general pair of words.
-{{/if}}
-
-Output the result in JSON format as specified by the output schema.`,
-});
-
-const generateToxicWordPairsFlow = ai.defineFlow(
-  {
-    name: 'generateToxicWordPairsFlow',
-    inputSchema: GenerateToxicWordPairsInputSchema,
-    outputSchema: GenerateToxicWordPairsOutputSchema,
-  },
-  async (input) => {
-    const { output } = await prompt(input);
-    return output!;
-  }
-);
